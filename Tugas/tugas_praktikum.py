@@ -35,6 +35,28 @@ def insert_nilai(nim: str, nama: str, biologi: int, fisika: int, inggris: int, p
     con.close()
     return nim
 
+def update_nilai(nim: str, nama: str, biologi: int, fisika: int, inggris: int, prediksi: str):
+    con = koneksi()
+    cur = con.cursor()
+    cur.execute("""
+        UPDATE nilai_siswa 
+        SET nama_mahasiswa = ?, biologi = ?, fisika = ?, inggris = ?, prediksi_fakultas = ?
+        WHERE nim = ?
+    """, (nama, biologi, fisika, inggris, prediksi, nim))
+    con.commit()
+    affected = cur.rowcount
+    con.close()
+    return affected
+
+def delete_nilai(nim: str):
+    con = koneksi()
+    cur = con.cursor()
+    cur.execute("DELETE FROM nilai_siswa WHERE nim = ?", (nim,))
+    con.commit()
+    affected = cur.rowcount
+    con.close()
+    return affected
+
 def read_nilai():
     con = koneksi()
     cur = con.cursor()
@@ -53,7 +75,7 @@ class AplikasiPrediksi(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Prediksi Fakultas Berdasarkan Nilai")
-        self.geometry("800x520")
+        self.geometry("800x560")
         self.configure(bg="#f0f2f5")
 
         # Frame Input
@@ -115,6 +137,18 @@ class AplikasiPrediksi(tk.Tk):
         )
         self.btn_submit.pack(side="left", padx=5)
 
+        self.btn_update = tk.Button(
+            btn_frame, text="Update", width=12, 
+            command=self.update_nilai_data, bg="#9C27B0", fg="white", font=("Arial", 9, "bold")
+        )
+        self.btn_update.pack(side="left", padx=5)
+
+        self.btn_delete = tk.Button(
+            btn_frame, text="Delete", width=12, 
+            command=self.delete_nilai_data, bg="#F44336", fg="white", font=("Arial", 9, "bold")
+        )
+        self.btn_delete.pack(side="left", padx=5)
+
         self.btn_refresh = tk.Button(
             btn_frame, text="Refresh", width=12, 
             command=self.read_data, bg="#2196F3", fg="white", font=("Arial", 9, "bold")
@@ -151,6 +185,9 @@ class AplikasiPrediksi(tk.Tk):
         
         self.tree.pack(padx=16, pady=(0, 12), fill="both", expand=True)
 
+        # Bind double click untuk memilih data
+        self.tree.bind("<Double-1>", self.select_data)
+
         # Bind nilai input untuk prediksi otomatis
         self.ent_biologi.bind("<KeyRelease>", self.auto_prediksi)
         self.ent_fisika.bind("<KeyRelease>", self.auto_prediksi)
@@ -166,18 +203,33 @@ class AplikasiPrediksi(tk.Tk):
         self.ent_inggris.delete(0, tk.END)
         self.lbl_prediksi.config(text="-")
 
+    def select_data(self, event):
+        """Isi form dengan data yang dipilih dari treeview"""
+        selected = self.tree.selection()
+        if selected:
+            item = self.tree.item(selected[0])
+            values = item['values']
+            
+            self.clear_inputs()
+            self.ent_nim.insert(0, values[0])
+            self.ent_nama.insert(0, values[1])
+            self.ent_biologi.insert(0, values[2])
+            self.ent_fisika.insert(0, values[3])
+            self.ent_inggris.insert(0, values[4])
+            self.lbl_prediksi.config(text=values[5])
+
     def prediksi_fakultas(self, biologi: int, fisika: int, inggris: int) -> str:
         """
-        Logika prediksi:
+        Logika prediksi yang telah diperbarui:
         - Jika Biologi paling tinggi -> Kedokteran
         - Jika Fisika paling tinggi -> Teknik
         - Jika Inggris paling tinggi -> Bahasa
+        - Jika ada nilai yang sama, prioritas: Biologi > Fisika > Inggris
         """
-        nilai_max = max(biologi, fisika, inggris)
-        
-        if biologi == nilai_max:
+        # Cek kondisi untuk setiap prodi
+        if biologi >= fisika and biologi >= inggris:
             return "Kedokteran"
-        elif fisika == nilai_max:
+        elif fisika >= inggris:
             return "Teknik"
         else:
             return "Bahasa"
@@ -245,7 +297,48 @@ class AplikasiPrediksi(tk.Tk):
             self.read_data()
             self.clear_inputs()
         except Exception as e:
-            msg.showerror("DB Error", str(e))
+            msg.showerror("DB Error", f"Gagal menyimpan data.\n{str(e)}")
+
+    def update_nilai_data(self):
+        val = self.validate_inputs()
+        if not val:
+            return
+        
+        nim, nama, biologi, fisika, inggris = val
+        prediksi = self.prediksi_fakultas(biologi, fisika, inggris)
+        
+        try:
+            affected = update_nilai(nim, nama, biologi, fisika, inggris, prediksi)
+            if affected > 0:
+                msg.showinfo("Sukses", f"Data berhasil diupdate!\nNIM: {nim}\nPrediksi: {prediksi}")
+                self.read_data()
+                self.clear_inputs()
+            else:
+                msg.showwarning("Peringatan", f"Data dengan NIM {nim} tidak ditemukan.")
+        except Exception as e:
+            msg.showerror("DB Error", f"Gagal mengupdate data.\n{str(e)}")
+
+    def delete_nilai_data(self):
+        nim = self.ent_nim.get().strip()
+        
+        if not nim:
+            msg.showwarning("Peringatan", "Masukkan NIM yang akan dihapus.")
+            return
+        
+        confirm = msg.askyesno("Konfirmasi", f"Yakin ingin menghapus data dengan NIM {nim}?")
+        if not confirm:
+            return
+        
+        try:
+            affected = delete_nilai(nim)
+            if affected > 0:
+                msg.showinfo("Sukses", f"Data dengan NIM {nim} berhasil dihapus.")
+                self.read_data()
+                self.clear_inputs()
+            else:
+                msg.showwarning("Peringatan", f"Data dengan NIM {nim} tidak ditemukan.")
+        except Exception as e:
+            msg.showerror("DB Error", f"Gagal menghapus data.\n{str(e)}")
 
     def read_data(self):
         for row in self.tree.get_children():
